@@ -12,9 +12,16 @@ let markerLayer    = null;
 let nbhdLayer      = null;
 let nbhdLabelLayer = null;
 let activeMarker   = null;   // highlighted marker
-let activePanel    = null;   // 'property' | 'neighborhood'
+let activePanel      = null;   // 'property' | 'neighborhood'
+let filterPriorSale = false;
 
-const MEASURE_LABELS = { t: 'Total Assessed Value', l: 'Land Value', i: 'Improvement Value', ar: 'Assessment Ratio (Assessed / Market)' };
+const MEASURE_LABELS = {
+  t:   'Total Assessed Value',
+  l:   'Land Value',
+  i:   'Improvement Value',
+  ar:  'Assessment Ratio (index-adjusted)',
+  ars: 'Assessment Ratio (prior-year sale)',
+};
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const loadingEl      = document.getElementById('loading');
@@ -56,8 +63,7 @@ function buildColorScale(values) {
   if (!valid.length) return () => '#aaa';
 
   // Assessment ratio: diverging scale centered on 1.0
-  // blue = under-assessed (AR < 1), red = over-assessed (AR > 1)
-  if (currentMeasure === 'ar') {
+  if (currentMeasure === 'ar' || currentMeasure === 'ars') {
     const maxDev = Math.min(d3.max(valid.map(v => Math.abs(v - 1))), 0.6);
     return d3.scaleDivergingSqrt(d3.interpolateRdBu)
       .domain([1 + maxDev, 1, 1 - maxDev])
@@ -82,7 +88,8 @@ function getValue(feat) {
   if (!hist) return null;
   const entry = hist[currentYear];
   if (!entry) return null;
-  if (currentMeasure === 'ar') return entry.ar ?? null;
+  if (currentMeasure === 'ar')  return entry.ar  ?? null;
+  if (currentMeasure === 'ars') return entry.ars ?? null;
   return entry[currentMeasure] || null;
 }
 
@@ -92,7 +99,7 @@ function drawLegend() {
   const ctx = legendCanvas.getContext('2d');
   const W = legendCanvas.width;
 
-  if (currentMeasure === 'ar') {
+  if (currentMeasure === 'ar' || currentMeasure === 'ars') {
     // Diverging: blue (under) → white (= 1) → red (over)
     for (let x = 0; x < W; x++) {
       ctx.fillStyle = d3.interpolateRdBu(1 - x / W);
@@ -163,14 +170,25 @@ function buildMarkers() {
   updateSummaryStats();
 }
 
+function isVisible(feat) {
+  if (!filterPriorSale) return true;
+  const entry = feat.properties.hist?.[currentYear];
+  return entry?.ars != null;
+}
+
 function refreshColors() {
   if (!markerLayer) return;
-  const values = parcelsData.features.map(getValue);
+  const values = parcelsData.features.filter(isVisible).map(getValue);
   colorScale = buildColorScale(values);
 
   markerLayer.eachLayer(function (m) {
+    const vis = isVisible(m._feat);
+    if (!vis) {
+      m.setStyle({ fillOpacity: 0, opacity: 0 });
+      return;
+    }
     const color = getColor(m._feat);
-    m.setStyle({ fillColor: color });
+    m.setStyle({ fillColor: color, fillOpacity: 0.85, opacity: 1 });
     if (m === activeMarker) m.setStyle({ radius: 6, weight: 2, color: '#1a2340' });
   });
 
@@ -180,7 +198,7 @@ function refreshColors() {
 
 // ── Summary stats ──────────────────────────────────────────────────────────
 function updateSummaryStats() {
-  const values = parcelsData.features.map(getValue).filter(v => v != null && v > 0);
+  const values = parcelsData.features.filter(isVisible).map(getValue).filter(v => v != null && v > 0);
   document.getElementById('stat-year').textContent = currentYear;
   document.getElementById('stat-parcels').textContent = values.length.toLocaleString();
   document.getElementById('stat-median').textContent = formatDollars(d3.median(values));
@@ -368,12 +386,23 @@ function openPanel(feat) {
     ${cur.ar != null ? `
     <div class="panel-ar-row">
       <div class="panel-ar-block ${cur.ar > 1.05 ? 'ar-over' : cur.ar < 0.95 ? 'ar-under' : 'ar-fair'}">
-        <span class="panel-ar-label">Assessment Ratio</span>
+        <span class="panel-ar-label">Assessment Ratio (index-adjusted)</span>
         <span class="panel-ar-num">${cur.ar.toFixed(3)}</span>
         <span class="panel-ar-sub">
           ${cur.ar > 1.05 ? 'Over-assessed' : cur.ar < 0.95 ? 'Under-assessed' : 'Near market value'}
           &mdash; est. market value ${formatDollars(cur.mv)}
-          ${cur.sy ? `(sale ${cur.sy}, index-adjusted)` : ''}
+          (sale ${cur.sy}, index-adjusted)
+        </span>
+      </div>
+    </div>` : ''}
+    ${cur.ars != null ? `
+    <div class="panel-ar-row">
+      <div class="panel-ar-block ${cur.ars > 1.05 ? 'ar-over' : cur.ars < 0.95 ? 'ar-under' : 'ar-fair'}">
+        <span class="panel-ar-label">Assessment Ratio (prior-year sale)</span>
+        <span class="panel-ar-num">${cur.ars.toFixed(3)}</span>
+        <span class="panel-ar-sub">
+          ${cur.ars > 1.05 ? 'Over-assessed' : cur.ars < 0.95 ? 'Under-assessed' : 'Near market value'}
+          &mdash; sale price ${formatDollars(cur.sp)} in ${currentYear - 1}
         </span>
       </div>
     </div>` : ''}
@@ -391,12 +420,14 @@ function openPanel(feat) {
           <th>Land</th>
           <th>Improvement</th>
           <th>AR</th>
+          <th>Sale AR</th>
         </tr>
       </thead>
       <tbody>
         ${years.slice().reverse().map(yr => {
           const e = hist[yr];
-          const arClass = e.ar == null ? '' : e.ar > 1.05 ? 'ar-cell-over' : e.ar < 0.95 ? 'ar-cell-under' : '';
+          const arClass  = e.ar  == null ? '' : e.ar  > 1.05 ? 'ar-cell-over' : e.ar  < 0.95 ? 'ar-cell-under' : '';
+          const arsClass = e.ars == null ? '' : e.ars > 1.05 ? 'ar-cell-over' : e.ars < 0.95 ? 'ar-cell-under' : '';
           return `
           <tr class="${yr === currentYear ? 'current-year' : ''}">
             <td>${yr}</td>
@@ -404,6 +435,7 @@ function openPanel(feat) {
             <td>${e.l != null ? formatDollars(e.l) : '—'}</td>
             <td>${e.i != null ? formatDollars(e.i) : '—'}</td>
             <td class="${arClass}">${e.ar != null ? e.ar.toFixed(3) : '—'}</td>
+            <td class="${arsClass}">${e.ars != null ? e.ars.toFixed(3) : '—'}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -881,6 +913,11 @@ document.querySelectorAll('input[name="measure"]').forEach(el => {
   });
 });
 
+
+document.getElementById('filter-prior-sale').addEventListener('change', function () {
+  filterPriorSale = this.checked;
+  refreshColors();
+});
 
 // ── Format helpers ─────────────────────────────────────────────────────────
 function formatDollars(v) {
