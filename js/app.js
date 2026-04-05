@@ -757,12 +757,6 @@ document.querySelectorAll('input[name="measure"]').forEach(el => {
   });
 });
 
-document.querySelectorAll('input[name="scale"]').forEach(el => {
-  el.addEventListener('change', function () {
-    currentScale = this.value;
-    refreshColors();
-  });
-});
 
 // ── Format helpers ─────────────────────────────────────────────────────────
 function formatDollars(v) {
