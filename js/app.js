@@ -13,7 +13,6 @@ let nbhdLayer      = null;
 let nbhdLabelLayer = null;
 let activeMarker   = null;   // highlighted marker
 let activePanel      = null;   // 'property' | 'neighborhood'
-let filterPriorSale = false;
 
 const MEASURE_LABELS = {
   t:   'Total Assessed Value',
@@ -171,9 +170,11 @@ function buildMarkers() {
 }
 
 function isVisible(feat) {
-  if (!filterPriorSale) return true;
-  const entry = feat.properties.hist?.[currentYear];
-  return entry?.ars != null;
+  // When viewing prior-year sale AR, only show properties sold in the prior year
+  if (currentMeasure === 'ars') {
+    return feat.properties.hist?.[currentYear]?.ars != null;
+  }
+  return true;
 }
 
 function refreshColors() {
@@ -283,12 +284,23 @@ function drawDecileChart() {
     .attr('class', 'decile-bar')
     .attr('transform', d => `translate(${xScale(d.d)}, 0)`);
 
+  // Bar fill: diverging red/blue for ratio measures, sequential navy for dollar measures
+  function barFill(avgM) {
+    if (isRatio) {
+      if (avgM > 1.02) return '#b91c1c';   // over-assessed → red
+      if (avgM < 0.98) return '#1d4ed8';   // under-assessed → blue
+      return '#2d6a4f';                     // near parity → green
+    }
+    return '#2b3658';  // solid navy for dollar measures
+  }
+
   barGroups.append('rect')
     .attr('x', 0)
     .attr('width', xScale.bandwidth())
     .attr('y', d => yScale(Math.max(d.avgM, yMin)))
     .attr('height', d => Math.abs(yScale(Math.min(d.avgM, yMax)) - yScale(Math.max(d.avgM, yMin))))
-    .attr('fill', d => colorScale ? colorScale(d.avgM) : '#b5895a')
+    .attr('fill', d => barFill(d.avgM))
+    .attr('opacity', 0.82)
     .attr('rx', 1);
 
   // Value label above each bar
@@ -333,7 +345,7 @@ function drawDecileChart() {
 
   // Update title
   document.getElementById('decile-chart-title').textContent =
-    `Avg. ${MEASURE_LABELS[currentMeasure]} by market value decile \u2014 ${currentYear}${filterPriorSale ? ' (prior-year sales)' : ''}`;
+    `Avg. ${MEASURE_LABELS[currentMeasure]} by market value decile \u2014 ${currentYear}${currentMeasure === 'ars' ? ' (prior-year sales only)' : ''}`;
 }
 
 // ── Summary stats ──────────────────────────────────────────────────────────
@@ -1053,11 +1065,6 @@ document.querySelectorAll('input[name="measure"]').forEach(el => {
   });
 });
 
-
-document.getElementById('filter-prior-sale').addEventListener('change', function () {
-  filterPriorSale = this.checked;
-  refreshColors();
-});
 
 // ── Format helpers ─────────────────────────────────────────────────────────
 function formatDollars(v) {
