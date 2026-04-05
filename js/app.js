@@ -13,8 +13,6 @@ let nbhdLayer      = null;
 let nbhdLabelLayer = null;
 let activeMarker   = null;   // highlighted marker
 let activePanel    = null;   // 'property' | 'neighborhood'
-let showNbhds      = true;
-let showLabels     = true;
 
 const MEASURE_LABELS = { t: 'Total Assessed Value', l: 'Land Value', i: 'Improvement Value' };
 
@@ -228,7 +226,7 @@ function buildNeighborhoods() {
     },
   });
 
-  if (showNbhds) nbhdLayer.addTo(map);
+  nbhdLayer.addTo(map);
 
   // Labels as divIcon markers
   nbhdLabelLayer = L.layerGroup();
@@ -269,7 +267,7 @@ function buildNeighborhoods() {
     });
     nbhdLabelLayer.addLayer(label);
   }
-  if (showLabels) nbhdLabelLayer.addTo(map);
+  nbhdLabelLayer.addTo(map);
 }
 
 // ── Tooltip ────────────────────────────────────────────────────────────────
@@ -764,22 +762,6 @@ document.querySelectorAll('input[name="scale"]').forEach(el => {
     currentScale = this.value;
     refreshColors();
   });
-});
-
-document.getElementById('toggle-neighborhoods').addEventListener('change', function () {
-  showNbhds = this.checked;
-  if (nbhdLayer) {
-    if (showNbhds) nbhdLayer.addTo(map);
-    else map.removeLayer(nbhdLayer);
-  }
-});
-
-document.getElementById('toggle-labels').addEventListener('change', function () {
-  showLabels = this.checked;
-  if (nbhdLabelLayer) {
-    if (showLabels) nbhdLabelLayer.addTo(map);
-    else map.removeLayer(nbhdLabelLayer);
-  }
 });
 
 // ── Format helpers ─────────────────────────────────────────────────────────
