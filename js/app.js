@@ -12,7 +12,7 @@ let nbhdLayer      = null;
 let nbhdLabelLayer = null;
 let activeMarker   = null;   // highlighted marker
 let showNbhds      = true;
-let showLabels     = false;
+let showLabels     = true;
 
 const MEASURE_LABELS = { t: 'Total Assessed Value', l: 'Land Value', i: 'Improvement Value' };
 
@@ -174,26 +174,51 @@ function updateSummaryStats() {
   document.getElementById('stat-total').textContent  = formatDollarsBig(d3.sum(values));
 }
 
+// ── Neighborhood colors ────────────────────────────────────────────────────
+// 20 visually distinct, muted hues that work as background fills behind dots
+const NBHD_PALETTE = [
+  '#c8d9e6','#d4e8c8','#e8d9c0','#d9c8e8','#c8e8e0',
+  '#e8e0c8','#e8c8d4','#c8e8cc','#e0c8e8','#cce8e4',
+  '#e8d4c8','#c8d4e8','#dce8c8','#e8c8e0','#c8e8d8',
+  '#e8e4c8','#d0c8e8','#c8e8e8','#e8d0c8','#dce8d8',
+];
+
+function nbhdColor(index) {
+  return NBHD_PALETTE[index % NBHD_PALETTE.length];
+}
+
 // ── Neighborhood layer ─────────────────────────────────────────────────────
 function buildNeighborhoods() {
   if (nbhdLayer) map.removeLayer(nbhdLayer);
   if (nbhdLabelLayer) map.removeLayer(nbhdLabelLayer);
 
+  // Assign a stable color index to each neighborhood by sort order
+  const nbhdIndex = {};
+  nbhdData.features.forEach((feat, i) => {
+    nbhdIndex[feat.properties.NeighCode] = i;
+  });
+
   nbhdLayer = L.geoJSON(nbhdData, {
-    style: {
-      fill: false,
-      color: '#1a2340',
-      weight: 1.5,
-      opacity: 0.35,
-      dashArray: '4 3',
+    style(feat) {
+      const idx = nbhdIndex[feat.properties.NeighCode] ?? 0;
+      const fill = nbhdColor(idx);
+      return {
+        fillColor: fill,
+        fillOpacity: 0.45,
+        color: '#1a2340',
+        weight: 1.2,
+        opacity: 0.4,
+      };
     },
     onEachFeature(feat, layer) {
-      layer.on('mouseover', function (e) {
-        const name = feat.properties.NeighHood || feat.properties.NeighCode;
-        layer.setStyle({ opacity: 0.7, weight: 2 });
+      const baseIdx = nbhdIndex[feat.properties.NeighCode] ?? 0;
+      const baseFill = nbhdColor(baseIdx);
+      layer.on('mouseover', function () {
+        layer.setStyle({ fillOpacity: 0.65, opacity: 0.8, weight: 2 });
+        layer.bringToFront();
       });
       layer.on('mouseout', function () {
-        layer.setStyle({ opacity: 0.35, weight: 1.5 });
+        layer.setStyle({ fillColor: baseFill, fillOpacity: 0.45, opacity: 0.4, weight: 1.2 });
       });
     },
   });
@@ -223,15 +248,15 @@ function buildNeighborhoods() {
         className: '',
         html: `<div style="
           font-family:'DM Sans',sans-serif;
-          font-size:9px;
-          font-weight:500;
-          letter-spacing:0.05em;
+          font-size:9.5px;
+          font-weight:600;
+          letter-spacing:0.04em;
           color:#1a2340;
           text-transform:uppercase;
           white-space:nowrap;
           pointer-events:none;
-          text-shadow:0 0 3px #fff, 0 0 3px #fff;
-          opacity:0.8;
+          text-shadow:0 0 4px #fff,0 0 4px #fff,0 0 4px #fff,0 0 4px #fff;
+          opacity:0.9;
         ">${name}</div>`,
         iconAnchor: [0, 0],
       }),
