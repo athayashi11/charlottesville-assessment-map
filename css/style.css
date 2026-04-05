@@ -392,6 +392,43 @@ h1 {
   padding: 1rem 1.25rem 2rem;
   clear: both;
 }
+/* ── Assessment Ratio display ────────────────────────────────────────────── */
+.panel-ar-row { margin: 0.5rem 0 0.25rem; }
+.panel-ar-block {
+  border-radius: 3px;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid var(--muted);
+}
+.panel-ar-block.ar-over  { border-left-color: #b91c1c; background: rgba(185,28,28,0.05); }
+.panel-ar-block.ar-under { border-left-color: #1d4ed8; background: rgba(29,78,216,0.05); }
+.panel-ar-block.ar-fair  { border-left-color: #2d6a4f; background: rgba(45,106,79,0.05); }
+.panel-ar-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 0.1rem;
+}
+.panel-ar-num {
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  color: var(--navy);
+  display: block;
+  line-height: 1.1;
+}
+.panel-ar-block.ar-over  .panel-ar-num { color: #b91c1c; }
+.panel-ar-block.ar-under .panel-ar-num { color: #1d4ed8; }
+.panel-ar-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  display: block;
+  margin-top: 0.2rem;
+  line-height: 1.4;
+}
+.ar-cell-over  { color: #b91c1c; font-weight: 500; }
+.ar-cell-under { color: #1d4ed8; font-weight: 500; }
+
 .panel-nbhd-badge {
   display: inline-block;
   font-size: 0.6rem;

@@ -14,7 +14,7 @@ let nbhdLabelLayer = null;
 let activeMarker   = null;   // highlighted marker
 let activePanel    = null;   // 'property' | 'neighborhood'
 
-const MEASURE_LABELS = { t: 'Total Assessed Value', l: 'Land Value', i: 'Improvement Value' };
+const MEASURE_LABELS = { t: 'Total Assessed Value', l: 'Land Value', i: 'Improvement Value', ar: 'Assessment Ratio (Assessed / Market)' };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const loadingEl      = document.getElementById('loading');
@@ -55,17 +55,16 @@ function buildColorScale(values) {
   const valid = values.filter(v => v != null && isFinite(v) && v > 0);
   if (!valid.length) return () => '#aaa';
 
-  if (currentScale === 'quantile') {
-    return d3.scaleQuantile().domain(valid).range(
-      d3.quantize(COLOR_INTERP, 8)
-    );
+  // Assessment ratio: diverging scale centered on 1.0
+  // blue = under-assessed (AR < 1), red = over-assessed (AR > 1)
+  if (currentMeasure === 'ar') {
+    const maxDev = Math.min(d3.max(valid.map(v => Math.abs(v - 1))), 0.6);
+    return d3.scaleDivergingSqrt(d3.interpolateRdBu)
+      .domain([1 + maxDev, 1, 1 - maxDev])
+      .clamp(true);
   }
-  if (currentScale === 'log') {
-    const mn = d3.min(valid), mx = d3.max(valid);
-    return d3.scaleSequentialLog(COLOR_INTERP).domain([Math.max(mn, 1), mx]).clamp(true);
-  }
-  // linear
-  return d3.scaleSequential(COLOR_INTERP).domain(d3.extent(valid)).clamp(true);
+
+  return d3.scaleQuantile().domain(valid).range(d3.quantize(COLOR_INTERP, 8));
 }
 
 function getColor(feat) {
@@ -83,6 +82,7 @@ function getValue(feat) {
   if (!hist) return null;
   const entry = hist[currentYear];
   if (!entry) return null;
+  if (currentMeasure === 'ar') return entry.ar ?? null;
   return entry[currentMeasure] || null;
 }
 
@@ -91,16 +91,29 @@ function drawLegend() {
   legendTitle.textContent = MEASURE_LABELS[currentMeasure];
   const ctx = legendCanvas.getContext('2d');
   const W = legendCanvas.width;
-  for (let x = 0; x < W; x++) {
-    ctx.fillStyle = COLOR_INTERP(x / W);
-    ctx.fillRect(x, 0, 1, 10);
-  }
 
-  const values = parcelsData.features.map(getValue).filter(v => v != null && v > 0);
-  if (!values.length) return;
-  const [mn, mx] = d3.extent(values);
-  legendMin.textContent = formatDollars(mn);
-  legendMax.textContent = formatDollars(mx);
+  if (currentMeasure === 'ar') {
+    // Diverging: blue (under) → white (= 1) → red (over)
+    for (let x = 0; x < W; x++) {
+      ctx.fillStyle = d3.interpolateRdBu(1 - x / W);
+      ctx.fillRect(x, 0, 1, 10);
+    }
+    const values = parcelsData.features.map(getValue).filter(v => v != null && v > 0);
+    if (!values.length) return;
+    const maxDev = Math.min(d3.max(values.map(v => Math.abs(v - 1))), 0.6);
+    legendMin.textContent = `${(1 - maxDev).toFixed(2)} (under)`;
+    legendMax.textContent = `${(1 + maxDev).toFixed(2)} (over)`;
+  } else {
+    for (let x = 0; x < W; x++) {
+      ctx.fillStyle = COLOR_INTERP(x / W);
+      ctx.fillRect(x, 0, 1, 10);
+    }
+    const values = parcelsData.features.map(getValue).filter(v => v != null && v > 0);
+    if (!values.length) return;
+    const [mn, mx] = d3.extent(values);
+    legendMin.textContent = formatDollars(mn);
+    legendMax.textContent = formatDollars(mx);
+  }
 }
 
 // ── Markers ────────────────────────────────────────────────────────────────
@@ -274,7 +287,7 @@ function buildNeighborhoods() {
 function showTooltip(e, feat) {
   const v = getValue(feat);
   const p = feat.properties;
-  const vStr = v != null ? formatDollars(v) : 'No data';
+  const vStr = v != null ? (currentMeasure === 'ar' ? v.toFixed(3) : formatDollars(v)) : 'No data';
   tooltipEl.innerHTML = `
     <div class="tt-addr">${p.addr}</div>
     <div class="tt-neigh">${p.neigh || '—'}</div>
@@ -352,6 +365,19 @@ function openPanel(feat) {
         <span class="panel-val-num">${cur.i != null ? formatDollars(cur.i) : '—'}</span>
       </div>
     </div>
+    ${cur.ar != null ? `
+    <div class="panel-ar-row">
+      <div class="panel-ar-block ${cur.ar > 1.05 ? 'ar-over' : cur.ar < 0.95 ? 'ar-under' : 'ar-fair'}">
+        <span class="panel-ar-label">Assessment Ratio</span>
+        <span class="panel-ar-num">${cur.ar.toFixed(3)}</span>
+        <span class="panel-ar-sub">
+          ${cur.ar > 1.05 ? 'Over-assessed' : cur.ar < 0.95 ? 'Under-assessed' : 'Near market value'}
+          &mdash; est. market value ${formatDollars(cur.mv)}
+          ${cur.sy ? `(sale ${cur.sy}, index-adjusted)` : ''}
+        </span>
+      </div>
+    </div>` : ''}
+
 
     <div class="panel-section-title">Assessment History</div>
     <div id="history-chart"></div>
@@ -364,17 +390,22 @@ function openPanel(feat) {
           <th>Total</th>
           <th>Land</th>
           <th>Improvement</th>
+          <th>AR</th>
         </tr>
       </thead>
       <tbody>
-        ${years.slice().reverse().map(yr => `
+        ${years.slice().reverse().map(yr => {
+          const e = hist[yr];
+          const arClass = e.ar == null ? '' : e.ar > 1.05 ? 'ar-cell-over' : e.ar < 0.95 ? 'ar-cell-under' : '';
+          return `
           <tr class="${yr === currentYear ? 'current-year' : ''}">
             <td>${yr}</td>
-            <td>${hist[yr].t != null ? formatDollars(hist[yr].t) : '—'}</td>
-            <td>${hist[yr].l != null ? formatDollars(hist[yr].l) : '—'}</td>
-            <td>${hist[yr].i != null ? formatDollars(hist[yr].i) : '—'}</td>
-          </tr>
-        `).join('')}
+            <td>${e.t != null ? formatDollars(e.t) : '—'}</td>
+            <td>${e.l != null ? formatDollars(e.l) : '—'}</td>
+            <td>${e.i != null ? formatDollars(e.i) : '—'}</td>
+            <td class="${arClass}">${e.ar != null ? e.ar.toFixed(3) : '—'}</td>
+          </tr>`;
+        }).join('')}
       </tbody>
     </table>
   `;
@@ -477,7 +508,21 @@ function openNeighborhoodPanel(code, name) {
     ${indexHtml}
   `;
 
-  if (nbhd) drawIndexChart('index-chart', code, cityIdx);
+  if (nbhd) {
+    drawIndexChart('index-chart', code, cityIdx);
+
+    // Assessment ratio trend section
+    const arData = nbhd.ar;
+    const cityAr = indexData.city_ar;
+    if (arData && Object.keys(arData).length) {
+      const arSection = document.createElement('div');
+      arSection.innerHTML = `
+        <div class="panel-section-title" style="margin-top:1.1rem">Median Assessment Ratio by Year</div>
+        <div id="nbhd-ar-chart"></div>`;
+      panelContent.appendChild(arSection);
+      drawArChart('nbhd-ar-chart', arData, cityAr);
+    }
+  }
 
   detailPanel.classList.remove('panel-hidden');
   setTimeout(() => map.invalidateSize(), 220);
@@ -557,6 +602,85 @@ function drawIndexChart(containerId, nbhdCode, cityIdx) {
   // Legend
   const leg = svg.append('g').attr('transform', `translate(0,${iH + 16})`);
   [{ color: '#b5895a', label: 'This neighborhood' }, { color: '#aaa', label: 'City-wide', dash: '4 2' }]
+    .forEach((s, i) => {
+      const g = leg.append('g').attr('transform', `translate(${i * 120}, 0)`);
+      const ln = g.append('line').attr('x1', 0).attr('x2', 14).attr('y1', -3).attr('y2', -3)
+        .attr('stroke', s.color).attr('stroke-width', s.dash ? 1.2 : 2);
+      if (s.dash) ln.attr('stroke-dasharray', s.dash);
+      g.append('text').attr('x', 17).attr('y', 0)
+        .text(s.label).style('font-size', '8.5px').style('fill', '#8a95a3');
+    });
+}
+
+// ── Assessment Ratio trend chart ───────────────────────────────────────────
+function drawArChart(containerId, nbhdAr, cityAr) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+
+  const W = 292, H = 120;
+  const margin = { top: 10, right: 12, bottom: 24, left: 36 };
+  const iW = W - margin.left - margin.right;
+  const iH = H - margin.top - margin.bottom;
+
+  const years = Object.keys(nbhdAr).map(Number).sort((a, b) => a - b).filter(y => y >= 1997 && y <= 2025);
+  const nbhdSeries = years.map(y => ({ year: y, v: nbhdAr[String(y)] ?? null }));
+  const citySeries = cityAr ? years.map(y => ({ year: y, v: cityAr[String(y)] ?? null })) : [];
+
+  const allVals = [...nbhdSeries, ...citySeries].map(d => d.v).filter(v => v != null);
+  const yMin = Math.min(d3.min(allVals), 0.85);
+  const yMax = Math.max(d3.max(allVals), 1.15);
+
+  const xScale = d3.scaleLinear().domain([d3.min(years), d3.max(years)]).range([0, iW]);
+  const yScale = d3.scaleLinear().domain([yMin * 0.97, yMax * 1.03]).range([iH, 0]);
+
+  const svg = d3.select(container).append('svg')
+    .attr('width', W).attr('height', H)
+    .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // Grid
+  svg.append('g').selectAll('line').data(yScale.ticks(5)).join('line')
+    .attr('x1', 0).attr('x2', iW)
+    .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+    .attr('stroke', '#ddd8d0').attr('stroke-width', 0.5);
+
+  // AR = 1 reference line
+  svg.append('line')
+    .attr('x1', 0).attr('x2', iW)
+    .attr('y1', yScale(1)).attr('y2', yScale(1))
+    .attr('stroke', '#555').attr('stroke-width', 1).attr('stroke-dasharray', '3 2');
+  svg.append('text').attr('x', iW + 3).attr('y', yScale(1) + 3)
+    .text('1.0').style('font-size', '8px').style('fill', '#8a95a3');
+
+  const lineGen = d3.line().defined(d => d.v != null)
+    .x(d => xScale(d.year)).y(d => yScale(d.v)).curve(d3.curveMonotoneX);
+
+  // City line
+  if (citySeries.length) {
+    svg.append('path').datum(citySeries)
+      .attr('fill', 'none').attr('stroke', '#aaa').attr('stroke-width', 1.2)
+      .attr('stroke-dasharray', '4 2').attr('d', lineGen);
+  }
+
+  // Neighborhood line
+  svg.append('path').datum(nbhdSeries)
+    .attr('fill', 'none').attr('stroke', '#b5895a').attr('stroke-width', 2)
+    .attr('d', lineGen);
+
+  // Axes
+  svg.append('g').attr('transform', `translate(0,${iH})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d3.format('d')))
+    .call(g => { g.select('.domain').remove(); g.selectAll('.tick line').remove();
+      g.selectAll('text').style('font-size', '9px').style('fill', '#8a95a3'); });
+
+  svg.append('g')
+    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => d.toFixed(2)))
+    .call(g => { g.select('.domain').remove(); g.selectAll('.tick line').remove();
+      g.selectAll('text').style('font-size', '9px').style('fill', '#8a95a3'); });
+
+  // Legend
+  const leg = svg.append('g').attr('transform', `translate(0,${iH + 16})`);
+  [{ color: '#b5895a', label: 'This neighborhood' }, { color: '#aaa', label: 'City median', dash: '4 2' }]
     .forEach((s, i) => {
       const g = leg.append('g').attr('transform', `translate(${i * 120}, 0)`);
       const ln = g.append('line').attr('x1', 0).attr('x2', 14).attr('y1', -3).attr('y2', -3)
