@@ -244,10 +244,10 @@ function drawDecileChart() {
 
   const isRatio = currentMeasure === 'ar' || currentMeasure === 'ars';
 
-  const xScale = d3.scaleBand()
+  const xScale = d3.scalePoint()
     .domain(deciles.map(d => d.d))
     .range([0, iW])
-    .padding(0.18);
+    .padding(0.5);
 
   const yExtent = d3.extent(deciles, d => d.avgM);
   // For ratio measures include 1.0 in domain; for dollar measures include 0
@@ -260,14 +260,6 @@ function drawDecileChart() {
     .attr('width', W).attr('height', H)
     .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-  // Horizontal grid lines
-  svg.append('g').selectAll('line')
-    .data(yScale.ticks(4))
-    .join('line')
-    .attr('x1', 0).attr('x2', iW)
-    .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
-    .attr('stroke', '#ddd8d0').attr('stroke-width', 0.5);
-
   // Reference line at 1.0 for ratio measures
   if (isRatio) {
     svg.append('line')
@@ -278,7 +270,7 @@ function drawDecileChart() {
   }
 
   // Line through decile points
-  const cx = d => xScale(d.d) + xScale.bandwidth() / 2;
+  const cx = d => xScale(d.d);
 
   const line = d3.line()
     .x(d => cx(d))
@@ -314,7 +306,7 @@ function drawDecileChart() {
   svg.append('g')
     .attr('transform', `translate(0,${iH})`)
     .call(d3.axisBottom(xScale)
-      .tickFormat((d, i) => formatDollarsTick(deciles[i].mvUpper)))
+      .tickFormat(d => formatDollarsTick(deciles[d - 1].mvUpper)))
     .call(g => {
       g.select('.domain').remove();
       g.selectAll('.tick line').remove();
