@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Charlottesville Property Assessments</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div>
+      <h1>Charlottesville Property Assessments</h1>
+      <p class="header-sub">City of Charlottesville &middot; 1997–2026</p>
+    </div>
+    <a class="author-link" href="https://www.law.virginia.edu/faculty/andrew-hayashi" target="_blank" rel="noopener">
+      Andrew Hayashi &middot; UVA School of Law
+    </a>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="controls-inner">
+
+    <!-- Year -->
+    <div class="control-group">
+      <span class="control-label">Tax Year</span>
+      <div class="slider-row">
+        <span class="slider-bound">1997</span>
+        <input type="range" id="year-slider" class="slider" min="1997" max="2026" step="1" value="2026" />
+        <span class="slider-bound">2026</span>
+      </div>
+      <div class="slider-value" id="year-display">2026</div>
+    </div>
+
+    <!-- Measure -->
+    <div class="control-group">
+      <span class="control-label">Measure</span>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="measure" value="t" checked /> Total Value
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="measure" value="l" /> Land Value
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="measure" value="i" /> Improvement Value
+        </label>
+      </div>
+    </div>
+
+    <!-- Scale -->
+    <div class="control-group">
+      <span class="control-label">Color Scale</span>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="scale" value="quantile" checked /> Quantile
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="scale" value="linear" /> Linear
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="scale" value="log" /> Log
+        </label>
+      </div>
+    </div>
+
+    <!-- Layers -->
+    <div class="control-group">
+      <span class="control-label">Layers</span>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="checkbox" id="toggle-neighborhoods" checked />
+          Neighborhoods
+        </label>
+        <label class="radio-label">
+          <input type="checkbox" id="toggle-labels" />
+          Neighborhood Labels
+        </label>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="control-group search-group">
+      <span class="control-label">Search Address or Parcel</span>
+      <div class="search-row">
+        <input type="text" id="search-input" class="search-input" placeholder="e.g. 123 Main St or 010001000" />
+        <button id="search-clear" class="search-clear" title="Clear">&times;</button>
+      </div>
+      <div id="search-results" class="search-results"></div>
+    </div>
+
+    <!-- Summary stats -->
+    <div class="control-group" id="summary-stats">
+      <span class="control-label">City Totals (<span id="stat-year">2026</span>)</span>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <span class="stat-label">Parcels</span>
+          <span class="stat-value" id="stat-parcels">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Median Value</span>
+          <span class="stat-value" id="stat-median">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Total Roll</span>
+          <span class="stat-value" id="stat-total">—</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div id="loading">
+  <div class="loading-inner">
+    <div class="spinner"></div>
+    <p>Loading parcel data&hellip;</p>
+  </div>
+</div>
+
+<!-- Main layout -->
+<div id="app-layout">
+  <!-- Map -->
+  <div id="map-container">
+    <div id="map"></div>
+    <div id="legend">
+      <div class="legend-title" id="legend-title">Total Assessed Value</div>
+      <canvas id="legend-canvas" width="200" height="10"></canvas>
+      <div class="legend-labels">
+        <span class="legend-label" id="legend-min"></span>
+        <span class="legend-label" id="legend-max"></span>
+      </div>
+      <div class="legend-nodata">
+        <span class="legend-nodata-swatch"></span>
+        <span>No data / not geocoded</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail panel -->
+  <div id="detail-panel" class="panel-hidden">
+    <button id="panel-close" title="Close">&times;</button>
+    <div id="panel-content"></div>
+  </div>
+</div>
+
+<!-- Hover tooltip -->
+<div id="tooltip"></div>
+
+<footer>
+  <div class="footer-inner">
+    <p>
+      Data: City of Charlottesville Real Estate Assessment Records (1997–2026). Addresses geocoded via U.S. Census Bureau Geocoder.
+      14,553 of 15,672 parcels geocoded successfully. Property boundaries shown are assessment neighborhoods, not individual parcels.
+    </p>
+    <p>&copy; <span id="year-copy"></span> Andrew Hayashi &middot; University of Virginia School of Law.</p>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
