@@ -194,6 +194,146 @@ function refreshColors() {
 
   drawLegend();
   updateSummaryStats();
+  drawDecileChart();
+}
+
+// ── Decile chart ───────────────────────────────────────────────────────────
+function drawDecileChart() {
+  const container = document.getElementById('decile-chart');
+  container.innerHTML = '';
+
+  // Collect (marketValue, measureValue) pairs for visible parcels this year
+  const pairs = [];
+  for (const feat of parcelsData.features) {
+    if (!isVisible(feat)) continue;
+    const entry = feat.properties.hist?.[currentYear];
+    if (!entry) continue;
+
+    // Market value: use mv (index-adjusted est.) if available, fall back to t
+    const mv = entry.mv ?? entry.t;
+    if (!mv || mv <= 0) continue;
+
+    const m = getValue(feat);
+    if (m == null || !isFinite(m)) continue;
+
+    pairs.push({ mv, m });
+  }
+
+  if (pairs.length < 10) return;
+
+  // Sort by market value and divide into 10 equal-count deciles
+  pairs.sort((a, b) => a.mv - b.mv);
+  const n = pairs.length;
+  const deciles = Array.from({ length: 10 }, (_, d) => {
+    const lo = Math.floor(d * n / 10);
+    const hi = Math.floor((d + 1) * n / 10);
+    const slice = pairs.slice(lo, hi);
+    const avgM  = d3.mean(slice, p => p.m);
+    // x-label: upper-bound market value of this decile
+    const mvUpper = slice[slice.length - 1].mv;
+    return { d: d + 1, avgM, mvUpper };
+  });
+
+  // Dimensions — full controls width, compact height
+  const W      = container.clientWidth || 900;
+  const H      = 90;
+  const margin = { top: 8, right: 8, bottom: 34, left: 42 };
+  const iW     = W - margin.left - margin.right;
+  const iH     = H - margin.top - margin.bottom;
+
+  const isRatio = currentMeasure === 'ar' || currentMeasure === 'ars';
+
+  const xScale = d3.scaleBand()
+    .domain(deciles.map(d => d.d))
+    .range([0, iW])
+    .padding(0.18);
+
+  const yExtent = d3.extent(deciles, d => d.avgM);
+  // For ratio measures include 1.0 in domain; for dollar measures include 0
+  const yMin = isRatio ? Math.min(yExtent[0] * 0.97, 0.9) : 0;
+  const yMax = isRatio ? Math.max(yExtent[1] * 1.03, 1.1) : yExtent[1] * 1.08;
+
+  const yScale = d3.scaleLinear().domain([yMin, yMax]).range([iH, 0]);
+
+  const svg = d3.select(container).append('svg')
+    .attr('width', W).attr('height', H)
+    .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // Horizontal grid lines
+  svg.append('g').selectAll('line')
+    .data(yScale.ticks(4))
+    .join('line')
+    .attr('x1', 0).attr('x2', iW)
+    .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+    .attr('stroke', '#ddd8d0').attr('stroke-width', 0.5);
+
+  // Reference line at 1.0 for ratio measures
+  if (isRatio) {
+    svg.append('line')
+      .attr('x1', 0).attr('x2', iW)
+      .attr('y1', yScale(1)).attr('y2', yScale(1))
+      .attr('stroke', '#888').attr('stroke-width', 0.8)
+      .attr('stroke-dasharray', '3 2');
+  }
+
+  // Bars — color matches map color scale for the avg measure value
+  const barGroups = svg.selectAll('.decile-bar')
+    .data(deciles)
+    .join('g')
+    .attr('class', 'decile-bar')
+    .attr('transform', d => `translate(${xScale(d.d)}, 0)`);
+
+  barGroups.append('rect')
+    .attr('x', 0)
+    .attr('width', xScale.bandwidth())
+    .attr('y', d => yScale(Math.max(d.avgM, yMin)))
+    .attr('height', d => Math.abs(yScale(Math.min(d.avgM, yMax)) - yScale(Math.max(d.avgM, yMin))))
+    .attr('fill', d => colorScale ? colorScale(d.avgM) : '#b5895a')
+    .attr('rx', 1);
+
+  // Value label above each bar
+  barGroups.append('text')
+    .attr('x', xScale.bandwidth() / 2)
+    .attr('y', d => yScale(Math.max(d.avgM, yMin)) - 3)
+    .attr('text-anchor', 'middle')
+    .style('font-size', '7.5px')
+    .style('fill', '#4a5568')
+    .text(d => isRatio ? d.avgM.toFixed(2) : formatDollarsTick(d.avgM));
+
+  // X-axis: market value upper bound per decile
+  svg.append('g')
+    .attr('transform', `translate(0,${iH})`)
+    .call(d3.axisBottom(xScale)
+      .tickFormat((d, i) => formatDollarsTick(deciles[i].mvUpper)))
+    .call(g => {
+      g.select('.domain').remove();
+      g.selectAll('.tick line').remove();
+      g.selectAll('text')
+        .style('font-size', '8px')
+        .style('fill', '#8a95a3')
+        .attr('dy', '1em');
+    });
+
+  // X-axis label
+  svg.append('text')
+    .attr('x', iW / 2).attr('y', iH + 30)
+    .attr('text-anchor', 'middle')
+    .style('font-size', '8px').style('fill', '#aaa')
+    .text('Market value decile upper bound');
+
+  // Y-axis
+  svg.append('g')
+    .call(d3.axisLeft(yScale).ticks(4)
+      .tickFormat(d => isRatio ? d.toFixed(2) : formatDollarsTick(d)))
+    .call(g => {
+      g.select('.domain').remove();
+      g.selectAll('.tick line').remove();
+      g.selectAll('text').style('font-size', '8px').style('fill', '#8a95a3');
+    });
+
+  // Update title
+  document.getElementById('decile-chart-title').textContent =
+    `Avg. ${MEASURE_LABELS[currentMeasure]} by market value decile \u2014 ${currentYear}${filterPriorSale ? ' (prior-year sales)' : ''}`;
 }
 
 // ── Summary stats ──────────────────────────────────────────────────────────
@@ -959,6 +1099,7 @@ async function init() {
 
     buildNeighborhoods();
     buildMarkers();
+    drawDecileChart();
 
     loadingEl.classList.add('hidden');
   } catch (err) {

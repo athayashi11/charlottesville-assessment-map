@@ -547,6 +547,25 @@ footer p {
 .leaflet-container { background: #e8e4dc; }
 .leaflet-control-zoom a { color: var(--navy); }
 
+/* ── Decile chart ────────────────────────────────────────────────────────── */
+.decile-chart-wrap {
+  flex-basis: 100%;
+  width: 100%;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--rule);
+  margin-top: 0.25rem;
+}
+#decile-chart-title {
+  margin-bottom: 0.35rem;
+}
+#decile-chart svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.decile-bar { cursor: default; }
+.decile-bar:hover rect { opacity: 0.75; }
+
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   header, .controls, footer { padding-left: 1rem; padding-right: 1rem; }
