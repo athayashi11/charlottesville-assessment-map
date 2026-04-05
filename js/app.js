@@ -3,6 +3,7 @@
 // ── State ──────────────────────────────────────────────────────────────────
 let parcelsData    = null;   // raw GeoJSON FeatureCollection
 let nbhdData       = null;   // neighborhoods GeoJSON
+let indexData      = null;   // price index JSON
 let currentYear    = '2026';
 let currentMeasure = 't';    // 't' | 'l' | 'i'
 let currentScale   = 'quantile';
@@ -11,6 +12,7 @@ let markerLayer    = null;
 let nbhdLayer      = null;
 let nbhdLabelLayer = null;
 let activeMarker   = null;   // highlighted marker
+let activePanel    = null;   // 'property' | 'neighborhood'
 let showNbhds      = true;
 let showLabels     = true;
 
@@ -220,6 +222,9 @@ function buildNeighborhoods() {
       layer.on('mouseout', function () {
         layer.setStyle({ fillColor: baseFill, fillOpacity: 0.45, opacity: 0.4, weight: 1.2 });
       });
+      layer.on('click', function () {
+        openNeighborhoodPanel(feat.properties.NeighCode, feat.properties.NeighHood);
+      });
     },
   });
 
@@ -376,8 +381,29 @@ function openPanel(feat) {
     </table>
   `;
 
-  // Draw history chart with D3
+  activePanel = 'property';
+
+  // Draw assessment history chart
   drawHistoryChart(hist, years, currentYear);
+
+  // Append neighborhood price index section
+  const neighCode = p.neighCode;
+  const hasIndex  = indexData && indexData.neighborhoods[neighCode];
+  const idxSection = document.createElement('div');
+  idxSection.innerHTML = `
+    <div class="panel-section-title" style="margin-top:1.25rem">
+      Neighborhood Price Index (2000 = 100)
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:0.68rem">
+        &mdash; ${p.neigh || 'this neighborhood'}
+      </span>
+    </div>
+    ${hasIndex
+      ? '<div id="index-chart"></div>'
+      : '<p style="font-size:0.78rem;color:var(--muted);margin-top:0.35rem">Insufficient repeat sales in this neighborhood for a price index.</p>'
+    }
+  `;
+  panelContent.appendChild(idxSection);
+  if (hasIndex) drawIndexChart('index-chart', neighCode, indexData.city);
 
   detailPanel.classList.remove('panel-hidden');
   setTimeout(() => map.invalidateSize(), 220);
@@ -393,6 +419,155 @@ function closePanel() {
 }
 
 panelClose.addEventListener('click', closePanel);
+
+// ── Neighborhood panel ─────────────────────────────────────────────────────
+function openNeighborhoodPanel(code, name) {
+  // Deselect any active property marker
+  if (activeMarker) {
+    activeMarker.setStyle({ radius: 4, weight: 0.5, color: 'rgba(0,0,0,0.15)', fillColor: getColor(activeMarker._feat) });
+    activeMarker = null;
+  }
+  activePanel = 'neighborhood';
+
+  const nbhd = indexData && indexData.neighborhoods[code];
+  const cityIdx = indexData ? indexData.city : null;
+  const displayName = name || (nbhd && nbhd.name) || `Neighborhood ${code}`;
+
+  let statsHtml = '';
+  let indexHtml = '';
+  if (nbhd) {
+    const idx = nbhd.index;
+    const years = Object.keys(idx).map(Number).sort((a, b) => a - b);
+    const latest = idx[years[years.length - 1]];
+    const base   = idx[2000] || 100;
+    const pctChg = latest != null ? ((latest / base - 1) * 100).toFixed(1) : null;
+    const peakYr = years.reduce((best, yr) => (idx[yr] > (idx[best] || 0) ? yr : best), years[0]);
+
+    statsHtml = `
+      <div class="panel-value-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        <div class="panel-val-item">
+          <span class="panel-val-label">Sales</span>
+          <span class="panel-val-num">${nbhd.n_sales.toLocaleString()}</span>
+        </div>
+        <div class="panel-val-item">
+          <span class="panel-val-label">Repeat pairs</span>
+          <span class="panel-val-num">${nbhd.n_pairs.toLocaleString()}</span>
+        </div>
+        <div class="panel-val-item">
+          <span class="panel-val-label">Index (2025)</span>
+          <span class="panel-val-num">${latest != null ? latest.toFixed(0) : '—'}</span>
+        </div>
+        <div class="panel-val-item">
+          <span class="panel-val-label">Since 2000</span>
+          <span class="panel-val-num" style="color:${pctChg > 0 ? '#2d6a4f' : '#c0392b'}">${pctChg != null ? (pctChg > 0 ? '+' : '') + pctChg + '%' : '—'}</span>
+        </div>
+      </div>
+    `;
+    indexHtml = `<div class="panel-section-title">Price Index vs City (2000 = 100)</div>
+                 <div id="index-chart"></div>`;
+  } else {
+    indexHtml = `<p style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem">
+      Insufficient repeat sales to estimate a price index for this neighborhood.
+    </p>`;
+  }
+
+  panelContent.innerHTML = `
+    <div class="panel-nbhd-badge">Neighborhood</div>
+    <div class="panel-addr">${displayName}</div>
+    <div class="panel-meta"><span>Code: ${code}</span></div>
+    ${statsHtml}
+    ${indexHtml}
+  `;
+
+  if (nbhd) drawIndexChart('index-chart', code, cityIdx);
+
+  detailPanel.classList.remove('panel-hidden');
+  setTimeout(() => map.invalidateSize(), 220);
+}
+
+// ── Price index chart ──────────────────────────────────────────────────────
+function drawIndexChart(containerId, nbhdCode, cityIdx) {
+  const container = document.getElementById(containerId);
+  if (!container || !indexData) return;
+  container.innerHTML = '';
+
+  const nbhd = indexData.neighborhoods[nbhdCode];
+  if (!nbhd) return;
+
+  const W = 292;
+  const H = 130;
+  const margin = { top: 10, right: 12, bottom: 24, left: 40 };
+  const iW = W - margin.left - margin.right;
+  const iH = H - margin.top - margin.bottom;
+
+  // Build series: neighborhood + city, years 1997–2025
+  const years = indexData.years.map(Number).filter(y => y >= 1997 && y <= 2025);
+  const nbhdSeries = years.map(y => ({ year: y, v: nbhd.index[String(y)] ?? null }));
+  const citySeries = cityIdx ? years.map(y => ({ year: y, v: cityIdx[String(y)] ?? null })) : [];
+
+  const allVals = [...nbhdSeries, ...citySeries].map(d => d.v).filter(v => v != null);
+  const yMax = Math.max(d3.max(allVals), 110);
+  const yMin = Math.min(d3.min(allVals), 90);
+
+  const xScale = d3.scaleLinear().domain([d3.min(years), d3.max(years)]).range([0, iW]);
+  const yScale = d3.scaleLinear().domain([yMin * 0.95, yMax * 1.05]).range([iH, 0]);
+
+  const svg = d3.select(container).append('svg')
+    .attr('width', W).attr('height', H)
+    .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // Grid
+  svg.append('g').selectAll('line')
+    .data(yScale.ticks(5))
+    .join('line')
+    .attr('x1', 0).attr('x2', iW)
+    .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+    .attr('stroke', '#ddd8d0').attr('stroke-width', 0.5);
+
+  // Base-100 reference line
+  svg.append('line')
+    .attr('x1', 0).attr('x2', iW)
+    .attr('y1', yScale(100)).attr('y2', yScale(100))
+    .attr('stroke', '#aaa').attr('stroke-width', 0.8).attr('stroke-dasharray', '3 2');
+
+  const lineGen = d3.line().defined(d => d.v != null)
+    .x(d => xScale(d.year)).y(d => yScale(d.v)).curve(d3.curveMonotoneX);
+
+  // City line (grey, behind)
+  if (citySeries.length) {
+    svg.append('path').datum(citySeries)
+      .attr('fill', 'none').attr('stroke', '#aaa').attr('stroke-width', 1.2)
+      .attr('stroke-dasharray', '4 2').attr('d', lineGen);
+  }
+
+  // Neighborhood line (accent, in front)
+  svg.append('path').datum(nbhdSeries)
+    .attr('fill', 'none').attr('stroke', '#b5895a').attr('stroke-width', 2)
+    .attr('d', lineGen);
+
+  // Axes
+  svg.append('g').attr('transform', `translate(0,${iH})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d3.format('d')))
+    .call(g => { g.select('.domain').remove(); g.selectAll('.tick line').remove();
+      g.selectAll('text').style('font-size', '9px').style('fill', '#8a95a3'); });
+
+  svg.append('g')
+    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => d.toFixed(0)))
+    .call(g => { g.select('.domain').remove(); g.selectAll('.tick line').remove();
+      g.selectAll('text').style('font-size', '9px').style('fill', '#8a95a3'); });
+
+  // Legend
+  const leg = svg.append('g').attr('transform', `translate(0,${iH + 16})`);
+  [{ color: '#b5895a', label: 'This neighborhood' }, { color: '#aaa', label: 'City-wide', dash: '4 2' }]
+    .forEach((s, i) => {
+      const g = leg.append('g').attr('transform', `translate(${i * 120}, 0)`);
+      const ln = g.append('line').attr('x1', 0).attr('x2', 14).attr('y1', -3).attr('y2', -3)
+        .attr('stroke', s.color).attr('stroke-width', s.dash ? 1.2 : 2);
+      if (s.dash) ln.attr('stroke-dasharray', s.dash);
+      g.append('text').attr('x', 17).attr('y', 0)
+        .text(s.label).style('font-size', '8.5px').style('fill', '#8a95a3');
+    });
+}
 
 // ── History chart ──────────────────────────────────────────────────────────
 function drawHistoryChart(hist, years, highlightYear) {
@@ -571,8 +746,7 @@ yearSlider.addEventListener('input', function () {
   currentYear = this.value;
   yearDisplay.textContent = currentYear;
   refreshColors();
-  if (activeMarker) {
-    // Refresh detail panel for new year
+  if (activeMarker && activePanel === 'property') {
     openPanel(activeMarker._feat);
   }
 });
@@ -633,9 +807,10 @@ function formatDollarsTick(v) {
 // ── Boot ───────────────────────────────────────────────────────────────────
 async function init() {
   try {
-    const [parcelsResp, nbhdResp] = await Promise.all([
+    const [parcelsResp, nbhdResp, indexResp] = await Promise.all([
       fetch('data/parcels.geojson'),
       fetch('data/neighborhoods.geojson'),
+      fetch('data/price_index.json'),
     ]);
 
     if (!parcelsResp.ok) throw new Error('Failed to load parcels.geojson');
@@ -643,6 +818,7 @@ async function init() {
 
     parcelsData = await parcelsResp.json();
     nbhdData    = await nbhdResp.json();
+    if (indexResp.ok) indexData = await indexResp.json();
 
     buildNeighborhoods();
     buildMarkers();

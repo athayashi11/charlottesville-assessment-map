@@ -392,6 +392,18 @@ h1 {
   padding: 1rem 1.25rem 2rem;
   clear: both;
 }
+.panel-nbhd-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 0.1rem 0.4rem;
+  margin-bottom: 0.4rem;
+}
 .panel-addr {
   font-family: var(--serif);
   font-size: 1.25rem;
