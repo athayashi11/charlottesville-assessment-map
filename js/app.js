@@ -277,36 +277,34 @@ function drawDecileChart() {
       .attr('stroke-dasharray', '3 2');
   }
 
-  // Bars — color matches map color scale for the avg measure value
-  const barGroups = svg.selectAll('.decile-bar')
+  // Line through decile points
+  const cx = d => xScale(d.d) + xScale.bandwidth() / 2;
+
+  const line = d3.line()
+    .x(d => cx(d))
+    .y(d => yScale(d.avgM));
+
+  svg.append('path')
+    .datum(deciles)
+    .attr('fill', 'none')
+    .attr('stroke', isRatio ? '#4a5568' : '#2b3658')
+    .attr('stroke-width', 1.5)
+    .attr('d', line);
+
+  // Dots + value labels
+  const points = svg.selectAll('.decile-point')
     .data(deciles)
     .join('g')
-    .attr('class', 'decile-bar')
-    .attr('transform', d => `translate(${xScale(d.d)}, 0)`);
+    .attr('class', 'decile-point')
+    .attr('transform', d => `translate(${cx(d)}, ${yScale(d.avgM)})`);
 
-  // Bar fill: diverging red/blue for ratio measures, sequential navy for dollar measures
-  function barFill(avgM) {
-    if (isRatio) {
-      if (avgM > 1.02) return '#b91c1c';   // over-assessed → red
-      if (avgM < 0.98) return '#1d4ed8';   // under-assessed → blue
-      return '#2d6a4f';                     // near parity → green
-    }
-    return '#2b3658';  // solid navy for dollar measures
-  }
+  points.append('circle')
+    .attr('r', 3)
+    .attr('fill', isRatio ? '#4a5568' : '#2b3658');
 
-  barGroups.append('rect')
+  points.append('text')
     .attr('x', 0)
-    .attr('width', xScale.bandwidth())
-    .attr('y', d => yScale(Math.min(d.avgM, yMax)))
-    .attr('height', d => Math.abs(yScale(yMin) - yScale(Math.min(d.avgM, yMax))))
-    .attr('fill', d => barFill(d.avgM))
-    .attr('opacity', 0.82)
-    .attr('rx', 1);
-
-  // Value label above each bar
-  barGroups.append('text')
-    .attr('x', xScale.bandwidth() / 2)
-    .attr('y', d => yScale(Math.max(d.avgM, yMin)) - 3)
+    .attr('y', -6)
     .attr('text-anchor', 'middle')
     .style('font-size', '7.5px')
     .style('fill', '#4a5568')
