@@ -297,8 +297,8 @@ function drawDecileChart() {
   barGroups.append('rect')
     .attr('x', 0)
     .attr('width', xScale.bandwidth())
-    .attr('y', d => yScale(Math.max(d.avgM, yMin)))
-    .attr('height', d => Math.abs(yScale(Math.min(d.avgM, yMax)) - yScale(Math.max(d.avgM, yMin))))
+    .attr('y', d => yScale(Math.min(d.avgM, yMax)))
+    .attr('height', d => Math.abs(yScale(yMin) - yScale(Math.min(d.avgM, yMax))))
     .attr('fill', d => barFill(d.avgM))
     .attr('opacity', 0.82)
     .attr('rx', 1);
