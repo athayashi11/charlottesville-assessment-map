@@ -7,6 +7,7 @@ let indexData      = null;   // price index JSON
 let currentYear    = '2026';
 let currentMeasure = 't';    // 't' | 'l' | 'i'
 let currentScale   = 'quantile';
+let AR_MAX_DEV     = 0.6;   // fixed across all years; set in init()
 let colorScale     = null;
 let markerLayer    = null;
 let nbhdLayer      = null;
@@ -61,11 +62,10 @@ function buildColorScale(values) {
   const valid = values.filter(v => v != null && isFinite(v) && v > 0);
   if (!valid.length) return () => '#aaa';
 
-  // Assessment ratio: diverging scale centered on 1.0
+  // Assessment ratio: fixed diverging scale centered on 1.0 (consistent across years)
   if (currentMeasure === 'ar' || currentMeasure === 'ars') {
-    const maxDev = Math.min(d3.max(valid.map(v => Math.abs(v - 1))), 0.6);
     return d3.scaleDivergingSqrt(d3.interpolateRdBu)
-      .domain([1 + maxDev, 1, 1 - maxDev])
+      .domain([1 + AR_MAX_DEV, 1, 1 - AR_MAX_DEV])
       .clamp(true);
   }
 
@@ -104,11 +104,8 @@ function drawLegend() {
       ctx.fillStyle = d3.interpolateRdBu(1 - x / W);
       ctx.fillRect(x, 0, 1, 10);
     }
-    const values = parcelsData.features.map(getValue).filter(v => v != null && v > 0);
-    if (!values.length) return;
-    const maxDev = Math.min(d3.max(values.map(v => Math.abs(v - 1))), 0.6);
-    legendMin.textContent = `${(1 - maxDev).toFixed(2)} (under)`;
-    legendMax.textContent = `${(1 + maxDev).toFixed(2)} (over)`;
+    legendMin.textContent = `${(1 - AR_MAX_DEV).toFixed(2)} (under)`;
+    legendMax.textContent = `${(1 + AR_MAX_DEV).toFixed(2)} (over)`;
   } else {
     for (let x = 0; x < W; x++) {
       ctx.fillStyle = COLOR_INTERP(x / W);
@@ -712,8 +709,8 @@ function drawIndexChart(containerId, nbhdCode, cityIdx) {
   if (!nbhd) return;
 
   const W = 292;
-  const H = 130;
-  const margin = { top: 10, right: 12, bottom: 24, left: 40 };
+  const H = 144;
+  const margin = { top: 10, right: 12, bottom: 38, left: 40 };
   const iW = W - margin.left - margin.right;
   const iH = H - margin.top - margin.bottom;
 
@@ -774,7 +771,7 @@ function drawIndexChart(containerId, nbhdCode, cityIdx) {
       g.selectAll('text').style('font-size', '9px').style('fill', '#8a95a3'); });
 
   // Legend
-  const leg = svg.append('g').attr('transform', `translate(0,${iH + 16})`);
+  const leg = svg.append('g').attr('transform', `translate(0,${iH + 28})`);
   [{ color: '#b5895a', label: 'This neighborhood' }, { color: '#aaa', label: 'City-wide', dash: '4 2' }]
     .forEach((s, i) => {
       const g = leg.append('g').attr('transform', `translate(${i * 120}, 0)`);
@@ -792,8 +789,8 @@ function drawArChart(containerId, nbhdAr, cityAr) {
   if (!container) return;
   container.innerHTML = '';
 
-  const W = 292, H = 120;
-  const margin = { top: 10, right: 12, bottom: 24, left: 36 };
+  const W = 292, H = 134;
+  const margin = { top: 10, right: 12, bottom: 38, left: 36 };
   const iW = W - margin.left - margin.right;
   const iH = H - margin.top - margin.bottom;
 
@@ -853,7 +850,7 @@ function drawArChart(containerId, nbhdAr, cityAr) {
       g.selectAll('text').style('font-size', '9px').style('fill', '#8a95a3'); });
 
   // Legend
-  const leg = svg.append('g').attr('transform', `translate(0,${iH + 16})`);
+  const leg = svg.append('g').attr('transform', `translate(0,${iH + 28})`);
   [{ color: '#b5895a', label: 'This neighborhood' }, { color: '#aaa', label: 'City median', dash: '4 2' }]
     .forEach((s, i) => {
       const g = leg.append('g').attr('transform', `translate(${i * 120}, 0)`);
@@ -871,8 +868,8 @@ function drawHistoryChart(hist, years, highlightYear) {
   container.innerHTML = '';
 
   const W = 292;  // fixed width matching panel content area (340px panel - 2×1.25rem padding)
-  const H = 110;
-  const margin = { top: 8, right: 10, bottom: 22, left: 52 };
+  const H = 124;
+  const margin = { top: 8, right: 10, bottom: 36, left: 52 };
   const iW = W - margin.left - margin.right;
   const iH = H - margin.top - margin.bottom;
 
@@ -956,7 +953,7 @@ function drawHistoryChart(hist, years, highlightYear) {
     });
 
   // Simple legend
-  const leg = svg.append('g').attr('transform', `translate(0,${iH + 14})`);
+  const leg = svg.append('g').attr('transform', `translate(0,${iH + 26})`);
   lineStyles.forEach((s, i) => {
     const g = leg.append('g').attr('transform', `translate(${i * 70}, 0)`);
     g.append('line').attr('x1', 0).attr('x2', 12).attr('y1', -3).attr('y2', -3)
@@ -1047,12 +1044,10 @@ yearSlider.addEventListener('input', function () {
   }
 });
 
-document.querySelectorAll('input[name="measure"]').forEach(el => {
-  el.addEventListener('change', function () {
-    currentMeasure = this.value;
-    refreshColors();
-    if (activeMarker) openPanel(activeMarker._feat);
-  });
+document.getElementById('measure-select').addEventListener('change', function () {
+  currentMeasure = this.value;
+  refreshColors();
+  if (activeMarker) openPanel(activeMarker._feat);
 });
 
 
@@ -1093,6 +1088,23 @@ async function init() {
     parcelsData = await parcelsResp.json();
     nbhdData    = await nbhdResp.json();
     if (indexResp.ok) indexData = await indexResp.json();
+
+    // Precompute fixed AR color-scale range across all years so the legend
+    // stays consistent when scrubbing through time.
+    {
+      let maxDev = 0;
+      for (const feat of parcelsData.features) {
+        const hist = feat.properties.hist;
+        if (!hist) continue;
+        for (const entry of Object.values(hist)) {
+          for (const key of ['ar', 'ars']) {
+            const v = entry[key];
+            if (v != null && isFinite(v) && v > 0) maxDev = Math.max(maxDev, Math.abs(v - 1));
+          }
+        }
+      }
+      AR_MAX_DEV = Math.min(maxDev, 0.6);
+    }
 
     buildNeighborhoods();
     buildMarkers();

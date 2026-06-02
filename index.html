@@ -41,23 +41,13 @@
     <!-- Measure -->
     <div class="control-group">
       <span class="control-label">Measure</span>
-      <div class="radio-group">
-        <label class="radio-label">
-          <input type="radio" name="measure" value="t" checked /> Total Value
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="measure" value="l" /> Land Value
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="measure" value="i" /> Improvement Value
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="measure" value="ar" /> Assessment Ratio
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="measure" value="ars" /> Prior-Year Sale AR
-        </label>
-      </div>
+      <select id="measure-select" class="measure-select">
+        <option value="t" selected>Total Value</option>
+        <option value="l">Land Value</option>
+        <option value="i">Improvement Value</option>
+        <option value="ar">Assessment Ratio</option>
+        <option value="ars">Prior-Year Sale AR</option>
+      </select>
     </div>
 
     <!-- Search -->
